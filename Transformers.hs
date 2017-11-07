@@ -10,6 +10,7 @@ import Control.Monad.Identity
 import Control.Monad.Except
   ( ExceptT
   , runExceptT
+  , throwError
   )
 import Control.Monad.Trans.Except
   ( throwE 
@@ -181,7 +182,7 @@ eval2 :: Env -> Exp -> Eval2 Value
 eval2 env (Lit i)         = return $ IntVal i
 eval2 env (Var n)         =
   case Map.lookup n env of
-    Nothing -> throwE ("unbound variable: " ++ n)
+    Nothing   -> throwE ("unbound variable: " ++ n)
     Just val  -> return val
 eval2 env (Plus e1 e2)    = do
   v1 <- eval2 env e1
@@ -200,6 +201,48 @@ eval2 env (App e1 e2)     = do
     _                  ->
       throwE "type error in application"
 
+{-|
+  Typeclass instances for ReaderT
+-}
+type Eval3 a = ReaderT Env (ExceptT String Identity) a
+
+runEval3 :: forall a . Env -> Eval3 a -> Either String a
+runEval3 env eval3 =
+  let f = runReaderT eval3 :: Env -> ExceptT String Identity a
+      exceptId = f env :: ExceptT String Identity a
+      idEither = runExceptT exceptId :: Identity (Either String a)
+      either = runIdentity idEither :: Either String a
+   in either
 
 
+{-|
+  ReaderT monad evaluation. 
+-}
+eval3 :: Exp -> Eval3 Value
+eval3 (Lit i)       = return $ IntVal i
+eval3 (Var n)       = do
+  env <- ask
+  case Map.lookup n env of
+    Nothing   -> throwError ("unbound variable: " ++ n)
+    Just val  -> return val
+eval3 (Plus e1 e2)  = do
+  v1 <- eval3 e1
+  v2 <- eval3 e2
+  case (v1, v2) of
+    (IntVal i1, IntVal i2) -> return $ IntVal (i1 + i2)
+    _                      -> throwError "type error in addition"
+eval3 (Abs n e)     = do
+  env <- ask
+  return $ FunVal env n e
+eval3 (App e1 e2)     = do
+  v1 <- eval3 e1
+  v2 <- eval3 e2
+  case v1 of
+    FunVal env' n body ->
+      let env'' = Map.insert n v2 env'
+       in local (const env'') $ eval3 body
+    _                  ->
+      throwError "type error in application"
+
+-- data H = H
 
