@@ -244,5 +244,89 @@ eval3 (App e1 e2)     = do
     _                  ->
       throwError "type error in application"
 
--- data H = H
+{-|
+  Typeclass instances for StateT
+-}
+type Eval4 a = ReaderT Env (ExceptT String (StateT Integer Identity)) a
 
+runEval4 :: forall a
+          . Env 
+         -> Integer 
+         -> Eval4 a 
+         -> (Either String a, Integer)
+runEval4 env state eval4 =
+  let f = runReaderT eval4 :: Env -> (ExceptT String (StateT Integer Identity)) a
+      stateEither = runExceptT . f $ env :: StateT Integer Identity (Either String a)
+      f' = runStateT stateEither :: Integer -> Identity (Either String a, Integer)
+      tuple = runIdentity . f' $ state :: (Either String a, Integer)
+   in tuple
+
+tick :: (Num s, MonadState s m) => m ()
+tick = do
+  state <- get
+  put (state + 1)
+
+
+{-|
+  StateT monad evaluation. 
+  Not using do notation for better understanding
+-}
+eval4 :: Exp -> Eval4 Value
+eval4 (Lit i)       = tick >> (return $ IntVal i)
+eval4 (Var n)       = 
+  tick >> 
+    ask >>= \env ->
+      case Map.lookup n env of
+        Nothing   -> throwError ("unbound variable: " ++ n)
+        Just val  -> return val
+eval4 (Plus e1 e2)  =
+  tick >>
+    eval4 e1 >>= \v1 ->
+      eval4 e2 >>= \v2 ->
+        case (v1, v2) of
+          (IntVal i1, IntVal i2) -> 
+            return $ IntVal $ i1 + i2
+          _                      ->
+            throwError "type error in application"
+eval4 (Abs n e)     = 
+  tick >> 
+    ask >>= \env ->
+      return $ FunVal env n e
+eval4 (App e1 e2)   =
+  tick >>
+    eval4 e1 >>= \v1 ->
+      eval4 e2 >>= \v2 ->
+        case v1 of
+          FunVal env' n body ->
+            let env'' = Map.insert n v2 env'
+             in local (const env'') $ eval4 body
+          _                  ->
+            throwError "type error in application"
+    
+{-|
+  Typeclass instances for WriterT
+-}
+-- type Eval5 a = ReaderT Env 
+--                 (ExceptT String (WriterT (
+-- type Eval4 a = ReaderT Env (ExceptT String (StateT Integer Identity)) a
+
+-- runEval4 :: forall a
+--           . Env 
+--          -> Integer 
+--          -> Eval4 a 
+--          -> (Either String a, Integer)
+-- runEval4 env state eval4 =
+--   let f = runReaderT eval4 :: Env -> (ExceptT String (StateT Integer Identity)) a
+--       stateEither = runExceptT . f $ env :: StateT Integer Identity (Either String a)
+--       f' = runStateT stateEither :: Integer -> Identity (Either String a, Integer)
+--       tuple = runIdentity . f' $ state :: (Either String a, Integer)
+--    in tuple
+
+-- tick :: (Num s, MonadState s m) => m ()
+-- tick = do
+--   state <- get
+--   put (state + 1)
+
+
+
+data H = H
