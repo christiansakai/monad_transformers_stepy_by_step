@@ -353,11 +353,11 @@ eval5 :: Exp -> Eval5 Value
 eval5 (Lit i)       = tick >> (return $ IntVal i)
 eval5 (Var n)       = 
   tell n >>
-  tick >>
-    ask >>= \env ->
-      case Map.lookup n env of
-        Nothing   -> throwError ("unbound variable: " ++ n)
-        Just val  -> return val
+    tick >>
+      ask >>= \env ->
+        case Map.lookup n env of
+          Nothing   -> throwError ("unbound variable: " ++ n)
+          Just val  -> return val
 eval5 (Plus e1 e2)  = 
   tick >>
     eval5 e1 >>= \v1 ->
@@ -382,6 +382,82 @@ eval5 (App e1 e2)   =
           _                  ->
             throwError "type error in application"
 
+{-|
+  Typeclass instances for IO
+-}
+type Eval6 a = ReaderT Env
+                (ExceptT String
+                  (WriterT String
+                    (StateT Integer IO))) a
+                      
+runEval6 :: forall a
+          . Env 
+         -> Integer 
+         -> Eval6 a
+         -> IO ((Either String a, String), Integer)
+runEval6 env state eval6 =
+  let f :: Env -> ExceptT String
+                    (WriterT String
+                      (StateT Integer IO)) a
+      f = runReaderT eval6
+
+      writerT :: WriterT String
+                  (StateT Integer IO) (Either String a)
+      writerT = runExceptT . f $ env
+
+      stateT :: StateT Integer IO
+                  (Either String a, String)
+      stateT = runWriterT writerT
+
+      f' :: Integer -> IO ((Either String a, String), Integer)
+      f' = runStateT stateT
+
+      io :: IO ((Either String a, String), Integer)
+      io = f' state
+
+   in io
 
 
-data H = H
+{-|
+  IO monad evaluation. 
+  Not using do notation for better understanding
+-}
+eval6 :: Exp -> Eval6 Value
+eval6 exp@(Lit i)       = 
+  liftIO (print exp) >>
+    tick >> 
+      (return $ IntVal i)
+eval6 exp@(Var n)       = 
+  liftIO (print exp) >>
+    tell n >>
+      tick >>
+        ask >>= \env ->
+          case Map.lookup n env of
+            Nothing   -> throwError ("unbound variable: " ++ n)
+            Just val  -> return val
+eval6 exp@(Plus e1 e2)  = 
+  liftIO (print exp) >>
+    tick >>
+      eval6 e1 >>= \v1 ->
+        eval6 e2 >>= \v2 ->
+          case (v1, v2) of
+            (IntVal i1, IntVal i2) ->
+              return $ IntVal $ i1 + i2
+            _                      ->
+              throwError "type error in application"
+eval6 exp@(Abs n e)     = 
+  liftIO (print exp) >>
+    tick >>
+      ask >>= \env ->
+        return $ FunVal env n e
+eval6 exp@(App e1 e2)   =
+  liftIO (print exp) >>
+    tick >>
+      eval6 e1 >>= \v1 ->
+        eval6 e2 >>= \v2 ->
+          case v1 of
+            FunVal env' n body ->
+              let env'' = Map.insert n v2 env'
+               in local (const env'') $ eval6 body
+            _                  ->
+              throwError "type error in application"
